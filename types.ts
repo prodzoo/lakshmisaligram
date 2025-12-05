@@ -17,6 +17,12 @@ export enum GenerationStatus {
   ERROR = 'ERROR',
 }
 
+export interface GenerationResult {
+  status: GenerationStatus;
+  image?: string;
+  isHighRes?: boolean;
+}
+
 export interface GeneratedImage {
   data: string; // Base64 string
   mimeType: string;

@@ -1,12 +1,12 @@
 import React from 'react';
-import { Lock, Download, RefreshCw, Wand2 } from 'lucide-react';
+import { Download, Wand2, Sparkles, Image as ImageIcon } from 'lucide-react';
 import { StylePreset, GenerationStatus } from '../types';
 
 interface StyleCardProps {
   preset: StylePreset;
   status: GenerationStatus;
   imageUrl?: string;
-  isUnlocked: boolean;
+  isHighRes?: boolean;
   onAction: (preset: StylePreset) => void;
 }
 
@@ -14,7 +14,7 @@ export const StyleCard: React.FC<StyleCardProps> = ({
   preset, 
   status, 
   imageUrl, 
-  isUnlocked, 
+  isHighRes,
   onAction 
 }) => {
   const isLoading = status === GenerationStatus.LOADING;
@@ -30,54 +30,49 @@ export const StyleCard: React.FC<StyleCardProps> = ({
       {/* Card Content */}
       <div className="flex-1">
         {hasImage ? (
-          <div className="relative aspect-[3/4] w-full overflow-hidden">
+          <div className="relative aspect-[3/4] w-full overflow-hidden group-hover:shadow-2xl transition-shadow">
             {/* The Image */}
             <img 
               src={imageUrl} 
               alt={preset.name} 
-              className={`w-full h-full object-cover transition-all duration-500 ${!isUnlocked ? 'blur-[3px] scale-105' : ''}`}
+              className="w-full h-full object-cover"
             />
             
-            {/* Watermark Overlay (Only if locked) */}
-            {!isUnlocked && (
-               <div className="absolute inset-0 z-10 flex flex-col items-center justify-center overflow-hidden pointer-events-none">
-                 {/* Subtle dark overlay */}
-                 <div className="absolute inset-0 bg-slate-950/10" />
-                 {/* Diagonal Text Pattern - Toned down opacity */}
-                 <div className="w-[150%] h-[150%] flex flex-wrap content-center justify-center -rotate-12 opacity-10">
-                    {Array.from({ length: 12 }).map((_, i) => (
-                      <span key={i} className="text-white font-bold text-2xl m-8 whitespace-nowrap">
-                        ProHeadshot AI
-                      </span>
-                    ))}
-                 </div>
-               </div>
-            )}
-
-            {/* Lock Icon / Action Overlay */}
+            {/* Quality Badge */}
+            <div className="absolute top-2 right-2 pointer-events-none">
+              {isHighRes ? (
+                <span className="bg-emerald-500/90 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-lg backdrop-blur-sm border border-emerald-400/50 flex items-center gap-1">
+                  <Sparkles size={8} fill="currentColor" /> 2K HIGH RES
+                </span>
+              ) : (
+                <span className="bg-slate-800/80 text-slate-300 text-[10px] font-bold px-2 py-0.5 rounded-full shadow-lg backdrop-blur-sm border border-slate-600/50">
+                  PREVIEW
+                </span>
+              )}
+            </div>
+            
+            {/* Hover Overlay for Action */}
             <div 
-              className="absolute inset-0 z-20 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/40 cursor-pointer"
+              className="absolute inset-0 z-20 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/40 cursor-pointer backdrop-blur-[2px]"
               onClick={() => onAction(preset)}
             >
-               {!isUnlocked ? (
-                 <div className="bg-slate-950/90 text-white px-4 py-2 rounded-full flex items-center gap-2 shadow-xl transform translate-y-4 group-hover:translate-y-0 transition-transform">
-                   <Lock size={16} className="text-amber-400" />
-                   <span className="font-semibold text-sm">Unlock High Res</span>
-                 </div>
-               ) : (
-                 <div className="bg-indigo-600 text-white px-4 py-2 rounded-full flex items-center gap-2 shadow-xl">
-                   <Download size={16} />
-                   <span className="font-semibold text-sm">Download</span>
-                 </div>
-               )}
-            </div>
-
-            {/* Status Badge */}
-            {isUnlocked && (
-               <div className="absolute top-2 right-2 bg-green-500 text-white text-xs font-bold px-2 py-1 rounded-md shadow-lg z-20">
-                 PAID
+               <div className={`
+                 px-4 py-2 rounded-full flex items-center gap-2 shadow-xl transform scale-95 group-hover:scale-100 transition-transform
+                 ${isHighRes ? 'bg-indigo-600 text-white' : 'bg-emerald-600 text-white'}
+               `}>
+                 {isHighRes ? (
+                   <>
+                    <Download size={16} />
+                    <span className="font-semibold text-sm">Download</span>
+                   </>
+                 ) : (
+                   <>
+                    <Sparkles size={16} />
+                    <span className="font-semibold text-sm">Get High Res</span>
+                   </>
+                 )}
                </div>
-            )}
+            </div>
           </div>
         ) : (
           /* Placeholder State */
@@ -88,7 +83,9 @@ export const StyleCard: React.FC<StyleCardProps> = ({
             {isLoading ? (
                <div className="flex flex-col items-center gap-3 animate-pulse">
                  <div className="w-12 h-12 rounded-full border-4 border-slate-700 border-t-indigo-500 animate-spin" />
-                 <p className="text-sm text-indigo-400 font-medium">Designing...</p>
+                 <p className="text-sm text-indigo-400 font-medium">
+                    {imageUrl ? 'Enhancing...' : 'Designing...'}
+                 </p>
                </div>
             ) : (
                <>
@@ -110,8 +107,12 @@ export const StyleCard: React.FC<StyleCardProps> = ({
       {/* Footer for Generated Cards */}
       {hasImage && (
         <div className="p-3 bg-slate-900 border-t border-slate-800 flex justify-between items-center">
-          <span className="text-xs font-medium text-slate-300">{preset.name}</span>
-          {!isUnlocked && <Lock size={14} className="text-slate-500" />}
+          <span className="text-xs font-medium text-slate-300 truncate max-w-[120px]">{preset.name}</span>
+          {isHighRes ? (
+            <Download size={14} className="text-slate-500" />
+          ) : (
+            <ImageIcon size={14} className="text-slate-600" />
+          )}
         </div>
       )}
     </div>

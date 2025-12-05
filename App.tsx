@@ -1,8 +1,7 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Upload, Camera, Download, AlertCircle, Wand2, X, CheckCircle2, Lock, Loader2 } from 'lucide-react';
-import confetti from 'canvas-confetti';
+import React, { useState, useRef } from 'react';
+import { Upload, Camera, Download, AlertCircle, Wand2, X, Loader2 } from 'lucide-react';
 import { STYLE_PRESETS } from './constants';
-import { StylePreset, GenerationStatus } from './types';
+import { StylePreset, GenerationStatus, GenerationResult } from './types';
 import { editImage, validateImageContent } from './services/geminiService';
 import { Button } from './components/Button';
 import { StyleCard } from './components/StyleCard';
@@ -13,17 +12,7 @@ const App: React.FC = () => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   
   // State for tracking each style's status and result individually
-  const [results, setResults] = useState<Record<string, { status: GenerationStatus; image?: string }>>({});
-  
-  // Initialize unlocked styles from localStorage if available
-  const [unlockedStyles, setUnlockedStyles] = useState<Set<string>>(() => {
-    const saved = localStorage.getItem('proheadshot_unlocked');
-    return saved ? new Set(JSON.parse(saved)) : new Set();
-  });
-  
-  // Paywall Modal State
-  const [paywallPreset, setPaywallPreset] = useState<StylePreset | null>(null);
-  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+  const [results, setResults] = useState<Record<string, GenerationResult>>({});
   
   // Custom prompt state
   const [customPromptOpen, setCustomPromptOpen] = useState(false);
@@ -32,11 +21,6 @@ const App: React.FC = () => {
   const [customResult, setCustomResult] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // Persist unlocked styles
-  useEffect(() => {
-    localStorage.setItem('proheadshot_unlocked', JSON.stringify(Array.from(unlockedStyles)));
-  }, [unlockedStyles]);
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -79,7 +63,6 @@ const App: React.FC = () => {
           // Step 2: Proceed if valid
           setSelectedImage(base64Data);
           setResults({});
-          // We do NOT clear unlockedStyles here so users keep purchases across uploads
           setCustomResult(null);
           setErrorMsg(null);
         } catch (error) {
@@ -94,7 +77,7 @@ const App: React.FC = () => {
     }
   };
 
-  const generateStyle = async (preset: StylePreset) => {
+  const generateStyle = async (preset: StylePreset, highQuality: boolean = false) => {
     if (!selectedImage) return;
 
     // If custom, handle separately
@@ -103,89 +86,115 @@ const App: React.FC = () => {
       return;
     }
 
-    // Update status to loading
+    // Update status to loading. Keep existing image if we are upgrading to high res so UI doesn't flicker empty
     setResults(prev => ({
       ...prev,
-      [preset.id]: { status: GenerationStatus.LOADING }
+      [preset.id]: { 
+        status: GenerationStatus.LOADING, 
+        image: prev[preset.id]?.image,
+        isHighRes: prev[preset.id]?.isHighRes
+      }
     }));
 
     try {
       const match = selectedImage.match(/^data:(image\/[a-zA-Z+]+);base64,/);
       const mimeType = match ? match[1] : 'image/png';
       
-      const generatedBase64 = await editImage(selectedImage, mimeType, preset.prompt);
+      const generatedBase64 = await editImage(selectedImage, mimeType, preset.prompt, highQuality);
       
       setResults(prev => ({
         ...prev,
-        [preset.id]: { status: GenerationStatus.SUCCESS, image: generatedBase64 }
+        [preset.id]: { 
+          status: GenerationStatus.SUCCESS, 
+          image: generatedBase64,
+          isHighRes: highQuality
+        }
       }));
     } catch (err) {
+      console.error(err);
       setResults(prev => ({
         ...prev,
-        [preset.id]: { status: GenerationStatus.ERROR }
+        [preset.id]: { 
+          // If high res failed, revert to success state with previous image if available
+          status: prev[preset.id]?.image ? GenerationStatus.SUCCESS : GenerationStatus.ERROR,
+          image: prev[preset.id]?.image,
+          isHighRes: prev[preset.id]?.isHighRes
+        }
       }));
     }
   };
 
   const handleGenerateAll = async () => {
     const standardPresets = STYLE_PRESETS.filter(p => !p.isCustom);
-    // Trigger all in parallel
-    standardPresets.forEach(preset => {
-      if (results[preset.id]?.status !== GenerationStatus.SUCCESS) {
-        generateStyle(preset);
-      }
+    
+    // Identify which presets actually need generation (skip ones that are already successful)
+    // allowing users to "Generate All" again if some failed.
+    const toGenerate = standardPresets.filter(p => results[p.id]?.status !== GenerationStatus.SUCCESS);
+
+    if (toGenerate.length === 0) return;
+
+    // 1. VISUAL FEEDBACK: Set ALL cards to LOADING immediately.
+    // This creates the "generating all at once" feeling for the user.
+    setResults(prev => {
+      const next = { ...prev };
+      toGenerate.forEach(preset => {
+        next[preset.id] = {
+           status: GenerationStatus.LOADING,
+           image: next[preset.id]?.image, // Keep old image if retrying
+           isHighRes: next[preset.id]?.isHighRes
+        };
+      });
+      return next;
     });
+
+    // 2. Process sequentially in background to avoid 429 Resource Exhausted errors.
+    // The user sees them all spinning, but they complete one by one.
+    for (const preset of toGenerate) {
+      // generateStyle handles the API call and final success/error state
+      await generateStyle(preset, false);
+      
+      // Delay to respect API rate limits (avoiding the 429 error)
+      await new Promise(resolve => setTimeout(resolve, 1200));
+    }
   };
 
-  const handleCardAction = (preset: StylePreset) => {
+  const handleCardAction = async (preset: StylePreset) => {
     const result = results[preset.id];
     
-    // If not generated yet, generate it
+    // 1. If not generated yet, generate preview
     if (!result || result.status === GenerationStatus.IDLE || result.status === GenerationStatus.ERROR) {
-      generateStyle(preset);
+      generateStyle(preset, false);
       return;
     }
 
-    // If generated but locked, open paywall
-    if (result.status === GenerationStatus.SUCCESS && !unlockedStyles.has(preset.id)) {
-      setPaywallPreset(preset);
+    // 2. If generated but Low Res, upgrade to High Res
+    if (result.status === GenerationStatus.SUCCESS && !result.isHighRes) {
+      // Ensure User has selected an API Key for the Pro model
+      if ((window as any).aistudio && (window as any).aistudio.hasSelectedApiKey) {
+         const hasKey = await (window as any).aistudio.hasSelectedApiKey();
+         if (!hasKey) {
+            try {
+              await (window as any).aistudio.openSelectKey();
+            } catch (e) {
+              console.error("Key selection failed or cancelled", e);
+              return;
+            }
+         }
+      }
+      
+      await generateStyle(preset, true);
       return;
     }
 
-    // If unlocked, download
-    if (unlockedStyles.has(preset.id) && result.image) {
+    // 3. If High Res, Download
+    if (result.status === GenerationStatus.SUCCESS && result.isHighRes && result.image) {
       const link = document.createElement('a');
       link.href = result.image;
-      link.download = `pro-headshot-${preset.id}.png`;
+      link.download = `pro-headshot-${preset.id}-2k.png`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
     }
-  };
-
-  /**
-   * INTEGRATION POINT: Stripe Payment Handler
-   */
-  const handlePurchase = async () => {
-    if (!paywallPreset) return;
-    
-    setIsProcessingPayment(true);
-    
-    // --- SIMULATED PAYMENT (For Demo) ---
-    setTimeout(() => {
-      setUnlockedStyles(prev => new Set(prev).add(paywallPreset.id));
-      setIsProcessingPayment(false);
-      setPaywallPreset(null);
-      
-      // Trigger Celebration
-      confetti({
-        particleCount: 100,
-        spread: 70,
-        origin: { y: 0.6 },
-        colors: ['#6366f1', '#8b5cf6', '#d946ef']
-      });
-
-    }, 1500);
   };
 
   const handleCustomGenerate = async () => {
@@ -199,7 +208,8 @@ const App: React.FC = () => {
       // Enforce the headshot constraint in the prompt
       const enforcedPrompt = `Create a professional headshot where the subject is the absolute focus. The background must be blurred/bokeh and secondary to the person. ${customPromptText}`;
       
-      const result = await editImage(selectedImage, mimeType, enforcedPrompt);
+      // Custom defaults to Flash (Preview)
+      const result = await editImage(selectedImage, mimeType, enforcedPrompt, false);
       setCustomResult(result);
       setCustomStatus(GenerationStatus.SUCCESS);
     } catch (e) {
@@ -244,7 +254,6 @@ const App: React.FC = () => {
             </h2>
             <p className="text-lg text-slate-400 mb-12 leading-relaxed">
               Upload one selfie. We'll generate 6 professional styles for you to preview.
-              Pick the ones you love.
             </p>
 
             {errorMsg && (
@@ -315,7 +324,7 @@ const App: React.FC = () => {
                    icon={<Wand2 size={18} />}
                    className="w-full sm:w-auto shadow-indigo-500/20 shadow-lg"
                  >
-                   Generate All Styles
+                   Generate All Previews
                  </Button>
                </div>
             </div>
@@ -331,10 +340,8 @@ const App: React.FC = () => {
             {/* Styles Grid */}
             <div>
               <h2 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
-                Preview Styles
-                <span className="text-sm font-normal text-slate-500 ml-2 bg-slate-900 px-2 py-0.5 rounded-full border border-slate-800">
-                  Low Res Previews
-                </span>
+                Your Styles
+                <span className="text-sm font-normal text-slate-500 ml-2">(Click a preview to generate High Res)</span>
               </h2>
               
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
@@ -344,7 +351,7 @@ const App: React.FC = () => {
                     preset={preset}
                     status={results[preset.id]?.status || GenerationStatus.IDLE}
                     imageUrl={results[preset.id]?.image}
-                    isUnlocked={unlockedStyles.has(preset.id)}
+                    isHighRes={results[preset.id]?.isHighRes}
                     onAction={handleCardAction}
                   />
                 ))}
@@ -363,77 +370,6 @@ const App: React.FC = () => {
               </div>
             </div>
 
-          </div>
-        )}
-
-        {/* Paywall Modal */}
-        {paywallPreset && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm" onClick={() => setPaywallPreset(null)} />
-            <div className="relative bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-              
-              <div className="relative h-64 bg-slate-950">
-                 {/* Preview Image in Modal (Still blurred/watermarked slightly) */}
-                 <img 
-                   src={results[paywallPreset.id]?.image} 
-                   className="w-full h-full object-cover opacity-50 blur-sm"
-                   alt="Preview"
-                 />
-                 <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="bg-slate-900/90 p-4 rounded-full shadow-xl border border-slate-700">
-                       <Lock size={32} className="text-amber-400" />
-                    </div>
-                 </div>
-                 <button 
-                   onClick={() => setPaywallPreset(null)}
-                   className="absolute top-4 right-4 bg-black/50 p-2 rounded-full text-white hover:bg-black/70 transition-colors"
-                 >
-                   <X size={16} />
-                 </button>
-              </div>
-
-              <div className="p-6">
-                 <div className="flex justify-between items-start mb-4">
-                   <div>
-                     <h3 className="text-xl font-bold text-white">{paywallPreset.name}</h3>
-                     <p className="text-slate-400 text-sm">Professional High-Resolution Download</p>
-                   </div>
-                   <div className="text-right">
-                      <span className="block text-2xl font-bold text-white">$4.99</span>
-                      <span className="text-xs text-slate-500 line-through">$15.00</span>
-                   </div>
-                 </div>
-
-                 <ul className="space-y-3 mb-6">
-                    <li className="flex items-center gap-2 text-sm text-slate-300">
-                      <CheckCircle2 size={16} className="text-green-500" />
-                      4K Ultra-HD Resolution
-                    </li>
-                    <li className="flex items-center gap-2 text-sm text-slate-300">
-                      <CheckCircle2 size={16} className="text-green-500" />
-                      No Watermark
-                    </li>
-                    <li className="flex items-center gap-2 text-sm text-slate-300">
-                      <CheckCircle2 size={16} className="text-green-500" />
-                      Commercial Usage Rights
-                    </li>
-                 </ul>
-
-                 <Button 
-                   fullWidth 
-                   onClick={handlePurchase}
-                   isLoading={isProcessingPayment}
-                   className="bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 border-none"
-                 >
-                   {isProcessingPayment ? 'Processing Payment...' : 'Unlock & Download'}
-                 </Button>
-                 
-                 <p className="text-center text-xs text-slate-500 mt-4 flex items-center justify-center gap-1">
-                   <span>Secure payment via</span>
-                   <span className="font-bold text-white">Stripe</span>
-                 </p>
-              </div>
-            </div>
           </div>
         )}
 

@@ -1,21 +1,39 @@
 import { GoogleGenAI } from "@google/genai";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// We create the client dynamically in the function if needed, 
+// but for the standard flow we can stick to a simpler pattern 
+// provided we handle the key correctly in the UI layer (App.tsx).
+// However, to ensure we pick up the latest key if selected via UI:
+const getAIClient = () => new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 /**
- * edits an image based on a text prompt using Gemini 2.5 Flash Image
+ * edits an image based on a text prompt using Gemini 2.5 Flash Image (Preview)
+ * or Gemini 3 Pro Image Preview (High Quality)
  */
 export const editImage = async (
   base64Image: string,
   mimeType: string,
-  prompt: string
+  prompt: string,
+  highQuality: boolean = false
 ): Promise<string> => {
   try {
+    const ai = getAIClient();
+    
     // Ensure base64 string is raw data (remove data URL prefix if present)
     const rawBase64 = base64Image.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, '');
 
+    const model = highQuality ? 'gemini-3-pro-image-preview' : 'gemini-2.5-flash-image';
+    
+    // For Pro model, we can request higher resolution
+    const config = highQuality ? {
+      imageConfig: {
+        imageSize: '2K', 
+        aspectRatio: '3:4' // Headshot friendly ratio
+      }
+    } : undefined;
+
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash-image',
+      model: model,
       contents: {
         parts: [
           {
@@ -29,6 +47,7 @@ export const editImage = async (
           },
         ],
       },
+      config: config
     });
 
     // Iterate through parts to find the image output
@@ -59,6 +78,7 @@ export const validateImageContent = async (
   mimeType: string
 ): Promise<{ isValid: boolean; message?: string }> => {
   try {
+    const ai = getAIClient();
     const rawBase64 = base64Image.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, '');
     
     const prompt = `Analyze this image. Does it contain a real human person? 
