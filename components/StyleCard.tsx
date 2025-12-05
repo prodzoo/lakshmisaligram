@@ -1,41 +1,118 @@
 import React from 'react';
-import { StylePreset } from '../types';
+import { Lock, Download, RefreshCw, Wand2 } from 'lucide-react';
+import { StylePreset, GenerationStatus } from '../types';
 
 interface StyleCardProps {
   preset: StylePreset;
-  isSelected: boolean;
-  onSelect: (preset: StylePreset) => void;
+  status: GenerationStatus;
+  imageUrl?: string;
+  isUnlocked: boolean;
+  onAction: (preset: StylePreset) => void;
 }
 
-export const StyleCard: React.FC<StyleCardProps> = ({ preset, isSelected, onSelect }) => {
+export const StyleCard: React.FC<StyleCardProps> = ({ 
+  preset, 
+  status, 
+  imageUrl, 
+  isUnlocked, 
+  onAction 
+}) => {
+  const isLoading = status === GenerationStatus.LOADING;
+  const hasImage = status === GenerationStatus.SUCCESS && imageUrl;
+
   return (
     <div 
-      onClick={() => onSelect(preset)}
       className={`
-        relative cursor-pointer group rounded-xl p-4 transition-all duration-200 border-2
-        ${isSelected 
-          ? 'bg-slate-800 border-indigo-500 shadow-xl shadow-indigo-900/20' 
-          : 'bg-slate-900/50 border-slate-800 hover:border-slate-600 hover:bg-slate-800'
-        }
+        relative group rounded-xl transition-all duration-300 overflow-hidden border-2 flex flex-col h-full
+        ${hasImage ? 'border-indigo-500/50 bg-slate-900' : 'border-slate-800 bg-slate-900/50 hover:border-slate-600'}
       `}
     >
-      <div className={`
-        w-10 h-10 rounded-lg flex items-center justify-center mb-3
-        ${isSelected ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-400 group-hover:bg-slate-700 group-hover:text-slate-200'}
-      `}>
-        {preset.icon}
-      </div>
-      
-      <h3 className={`font-semibold mb-1 ${isSelected ? 'text-white' : 'text-slate-200'}`}>
-        {preset.name}
-      </h3>
-      
-      <p className="text-sm text-slate-400 leading-relaxed">
-        {preset.description}
-      </p>
+      {/* Card Content */}
+      <div className="flex-1">
+        {hasImage ? (
+          <div className="relative aspect-[3/4] w-full overflow-hidden">
+            {/* The Image */}
+            <img 
+              src={imageUrl} 
+              alt={preset.name} 
+              className={`w-full h-full object-cover transition-all duration-500 ${!isUnlocked ? 'blur-[3px] scale-105' : ''}`}
+            />
+            
+            {/* Watermark Overlay (Only if locked) */}
+            {!isUnlocked && (
+               <div className="absolute inset-0 z-10 flex flex-col items-center justify-center overflow-hidden pointer-events-none">
+                 {/* Subtle dark overlay */}
+                 <div className="absolute inset-0 bg-slate-950/10" />
+                 {/* Diagonal Text Pattern - Toned down opacity */}
+                 <div className="w-[150%] h-[150%] flex flex-wrap content-center justify-center -rotate-12 opacity-10">
+                    {Array.from({ length: 12 }).map((_, i) => (
+                      <span key={i} className="text-white font-bold text-2xl m-8 whitespace-nowrap">
+                        ProHeadshot AI
+                      </span>
+                    ))}
+                 </div>
+               </div>
+            )}
 
-      {isSelected && (
-        <div className="absolute top-3 right-3 w-3 h-3 bg-indigo-500 rounded-full shadow-lg shadow-indigo-500/50" />
+            {/* Lock Icon / Action Overlay */}
+            <div 
+              className="absolute inset-0 z-20 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/40 cursor-pointer"
+              onClick={() => onAction(preset)}
+            >
+               {!isUnlocked ? (
+                 <div className="bg-slate-950/90 text-white px-4 py-2 rounded-full flex items-center gap-2 shadow-xl transform translate-y-4 group-hover:translate-y-0 transition-transform">
+                   <Lock size={16} className="text-amber-400" />
+                   <span className="font-semibold text-sm">Unlock High Res</span>
+                 </div>
+               ) : (
+                 <div className="bg-indigo-600 text-white px-4 py-2 rounded-full flex items-center gap-2 shadow-xl">
+                   <Download size={16} />
+                   <span className="font-semibold text-sm">Download</span>
+                 </div>
+               )}
+            </div>
+
+            {/* Status Badge */}
+            {isUnlocked && (
+               <div className="absolute top-2 right-2 bg-green-500 text-white text-xs font-bold px-2 py-1 rounded-md shadow-lg z-20">
+                 PAID
+               </div>
+            )}
+          </div>
+        ) : (
+          /* Placeholder State */
+          <div 
+            onClick={() => onAction(preset)}
+            className="p-6 flex flex-col items-center text-center h-full justify-center min-h-[300px] cursor-pointer"
+          >
+            {isLoading ? (
+               <div className="flex flex-col items-center gap-3 animate-pulse">
+                 <div className="w-12 h-12 rounded-full border-4 border-slate-700 border-t-indigo-500 animate-spin" />
+                 <p className="text-sm text-indigo-400 font-medium">Designing...</p>
+               </div>
+            ) : (
+               <>
+                 <div className={`w-12 h-12 rounded-xl flex items-center justify-center mb-4 ${preset.color} text-white shadow-lg`}>
+                   {preset.icon}
+                 </div>
+                 <h3 className="font-bold text-slate-100 mb-2">{preset.name}</h3>
+                 <p className="text-sm text-slate-400 leading-relaxed mb-6">{preset.description}</p>
+                 <button className="text-xs font-medium bg-slate-800 text-slate-300 px-3 py-1.5 rounded-lg border border-slate-700 group-hover:bg-slate-700 group-hover:text-white transition-colors flex items-center gap-2">
+                   <Wand2 size={12} />
+                   Click to Generate
+                 </button>
+               </>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Footer for Generated Cards */}
+      {hasImage && (
+        <div className="p-3 bg-slate-900 border-t border-slate-800 flex justify-between items-center">
+          <span className="text-xs font-medium text-slate-300">{preset.name}</span>
+          {!isUnlocked && <Lock size={14} className="text-slate-500" />}
+        </div>
       )}
     </div>
   );

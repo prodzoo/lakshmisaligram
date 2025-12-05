@@ -7,6 +7,7 @@ export interface StylePreset {
   prompt: string;
   icon: React.ReactNode;
   color: string;
+  isCustom?: boolean;
 }
 
 export enum GenerationStatus {

@@ -19,13 +19,13 @@ export const editImage = async (
       contents: {
         parts: [
           {
-            text: prompt,
-          },
-          {
             inlineData: {
               data: rawBase64,
               mimeType: mimeType,
             },
+          },
+          {
+            text: prompt,
           },
         ],
       },
@@ -46,5 +46,48 @@ export const editImage = async (
   } catch (error) {
     console.error("Error editing image:", error);
     throw error;
+  }
+};
+
+/**
+ * Validates if the image contains a person.
+ * Returns valid: true if yes.
+ * Returns valid: false and a humorous message if no.
+ */
+export const validateImageContent = async (
+  base64Image: string,
+  mimeType: string
+): Promise<{ isValid: boolean; message?: string }> => {
+  try {
+    const rawBase64 = base64Image.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, '');
+    
+    const prompt = `Analyze this image. Does it contain a real human person? 
+    If YES, respond exactly with "YES". 
+    If it contains an animal, object, food, cartoon, or nothing identifiable as a human, respond with a short, witty, humorous, and slightly roasting error message explaining why this specific subject cannot get a professional headshot. 
+    Example: "That is a lovely sandwich, but it is unlikely to get hired as a VP of Sales. Please upload a human."`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash-image',
+      contents: {
+        parts: [
+          { inlineData: { data: rawBase64, mimeType: mimeType } },
+          { text: prompt }
+        ]
+      }
+    });
+
+    const text = response.text?.trim() || "";
+    
+    if (text.toUpperCase().includes("YES")) {
+      return { isValid: true };
+    }
+    
+    // If it's not YES, it's the humorous error message
+    return { isValid: false, message: text };
+
+  } catch (error) {
+    console.error("Validation error:", error);
+    // On error, default to valid to avoid blocking users if API is flaky
+    return { isValid: true };
   }
 };
